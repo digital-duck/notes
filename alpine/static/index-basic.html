@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Note Taking App - Alpine.js</title>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for better UX */
+        .note-card {
+            transition: all 0.3s ease;
+        }
+        .note-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8" x-data="notesApp()">
+        <!-- Header -->
+        <div class="bg-white rounded-lg shadow-sm p-6 mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">📝 Note Taking App</h1>
+            <p class="text-gray-600">Built with Alpine.js + FastAPI + SQLite</p>
+        </div>
+
+        <!-- Loading State -->
+        <div x-show="loading" class="text-center py-8">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            <p class="mt-2 text-gray-600">Loading notes...</p>
+        </div>
+
+        <!-- Error Message -->
+        <div x-show="error" x-transition class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            <span x-text="error"></span>
+        </div>
+
+        <!-- Success Message -->
+        <div x-show="success" x-transition class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded mb-4">
+            <span x-text="success"></span>
+        </div>
+
+        <!-- Add/Edit Note Form -->
+        <div class="bg-white rounded-lg shadow-sm p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4" x-text="editingNote ? 'Edit Note' : 'Add New Note'"></h2>
+            
+            <form @submit.prevent="editingNote ? updateNote() : createNote()">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Note Name *</label>
+                        <input 
+                            type="text" 
+                            x-model="form.note_name" 
+                            required
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Enter note name"
+                        >
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Note URL</label>
+                        <input 
+                            type="url" 
+                            x-model="form.note_url"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="https://example.com"
+                        >
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                    <textarea 
+                        x-model="form.note_description"
+                        rows="3"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Enter note description"
+                    ></textarea>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Comments</label>
+                    <textarea 
+                        x-model="form.note_comment"
+                        rows="2"
+                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="Additional comments"
+                    ></textarea>
+                </div>
+                
+                <div class="flex gap-2">
+                    <button 
+                        type="submit" 
+                        :disabled="loading"
+                        class="bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white px-4 py-2 rounded-md transition-colors"
+                        x-text="editingNote ? 'Update Note' : 'Add Note'"
+                    ></button>
+                    
+                    <button 
+                        x-show="editingNote"
+                        type="button" 
+                        @click="cancelEdit()"
+                        class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-md transition-colors"
+                    >
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Notes List -->
+        <div class="bg-white rounded-lg shadow-sm p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">Your Notes</h2>
+                <span class="text-gray-500" x-text="`${notes.length} note${notes.length !== 1 ? 's' : ''}`"></span>
+            </div>
+            
+            <!-- Empty State -->
+            <div x-show="notes.length === 0 && !loading" class="text-center py-8 text-gray-500">
+                <div class="text-4xl mb-2">📝</div>
+                <p>No notes yet. Create your first note above!</p>
+            </div>
+            
+            <!-- Notes Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <template x-for="note in notes" :key="note.id">
+                    <div class="note-card bg-gray-50 border border-gray-200 rounded-lg p-4 fade-in">
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="font-semibold text-lg text-gray-800" x-text="note.note_name"></h3>
+                            <div class="flex gap-1">
+                                <button 
+                                    @click="editNote(note)"
+                                    class="text-blue-500 hover:text-blue-700 p-1"
+                                    title="Edit note"
+                                >
+                                    ✏️
+                                </button>
+                                <button 
+                                    @click="deleteNote(note.id)"
+                                    class="text-red-500 hover:text-red-700 p-1"
+                                    title="Delete note"
+                                >
+                                    🗑️
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div x-show="note.note_description" class="mb-2">
+                            <p class="text-gray-600 text-sm" x-text="note.note_description"></p>
+                        </div>
+                        
+                        <div x-show="note.note_url" class="mb-2">
+                            <a 
+                                :href="note.note_url" 
+                                target="_blank"
+                                class="text-blue-500 hover:text-blue-700 text-sm underline"
+                                x-text="note.note_url"
+                            ></a>
+                        </div>
+                        
+                        <div x-show="note.note_comment" class="mb-3">
+                            <p class="text-gray-500 text-sm italic" x-text="note.note_comment"></p>
+                        </div>
+                        
+                        <div class="text-xs text-gray-400 border-t pt-2">
+                            <div>Created: <span x-text="formatDate(note.created_at)"></span></div>
+                            <div x-show="note.updated_at !== note.created_at">
+                                Updated: <span x-text="formatDate(note.updated_at)"></span>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function notesApp() {
+            return {
+                // State management - Similar to st.session_state in Streamlit
+                notes: [],
+                loading: false,
+                error: '',
+                success: '',
+                editingNote: null,
+                form: {
+                    note_name: '',
+                    note_description: '',
+                    note_url: '',
+                    note_comment: ''
+                },
+
+                // Initialize app - Similar to main() function in Streamlit
+                async init() {
+                    await this.loadNotes();
+                },
+
+                // Load all notes - Similar to @st.cache_data in Streamlit
+                async loadNotes() {
+                    this.loading = true;
+                    this.error = '';
+                    
+                    try {
+                        const response = await fetch('/api/notes');
+                        if (!response.ok) throw new Error('Failed to load notes');
+                        this.notes = await response.json();
+                    } catch (error) {
+                        this.error = 'Error loading notes: ' + error.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Create new note - Similar to form submission in Streamlit
+                async createNote() {
+                    this.loading = true;
+                    this.error = '';
+                    this.success = '';
+                    
+                    try {
+                        const response = await fetch('/api/notes', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(this.form)
+                        });
+                        
+                        if (!response.ok) throw new Error('Failed to create note');
+                        
+                        this.success = 'Note created successfully!';
+                        this.resetForm();
+                        await this.loadNotes();
+                        
+                        // Clear success message after 3 seconds
+                        setTimeout(() => this.success = '', 3000);
+                    } catch (error) {
+                        this.error = 'Error creating note: ' + error.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Update existing note
+                async updateNote() {
+                    this.loading = true;
+                    this.error = '';
+                    this.success = '';
+                    
+                    try {
+                        const response = await fetch(`/api/notes/${this.editingNote.id}`, {
+                            method: 'PUT',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                            body: JSON.stringify(this.form)
+                        });
+                        
+                        if (!response.ok) throw new Error('Failed to update note');
+                        
+                        this.success = 'Note updated successfully!';
+                        this.cancelEdit();
+                        await this.loadNotes();
+                        
+                        setTimeout(() => this.success = '', 3000);
+                    } catch (error) {
+                        this.error = 'Error updating note: ' + error.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Delete note - Similar to st.button with confirmation
+                async deleteNote(noteId) {
+                    if (!confirm('Are you sure you want to delete this note?')) return;
+                    
+                    this.loading = true;
+                    this.error = '';
+                    this.success = '';
+                    
+                    try {
+                        const response = await fetch(`/api/notes/${noteId}`, {
+                            method: 'DELETE'
+                        });
+                        
+                        if (!response.ok) throw new Error('Failed to delete note');
+                        
+                        this.success = 'Note deleted successfully!';
+                        await this.loadNotes();
+                        
+                        setTimeout(() => this.success = '', 3000);
+                    } catch (error) {
+                        this.error = 'Error deleting note: ' + error.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Edit note - Similar to editing mode in Streamlit
+                editNote(note) {
+                    this.editingNote = note;
+                    this.form = {
+                        note_name: note.note_name,
+                        note_description: note.note_description || '',
+                        note_url: note.note_url || '',
+                        note_comment: note.note_comment || ''
+                    };
+                    
+                    // Scroll to form
+                    document.querySelector('form').scrollIntoView({ behavior: 'smooth' });
+                },
+
+                // Cancel editing
+                cancelEdit() {
+                    this.editingNote = null;
+                    this.resetForm();
+                },
+
+                // Reset form
+                resetForm() {
+                    this.form = {
+                        note_name: '',
+                        note_description: '',
+                        note_url: '',
+                        note_comment: ''
+                    };
+                },
+
+                // Format date - Similar to helper functions in Streamlit
+                formatDate(dateString) {
+                    return new Date(dateString).toLocaleString();
+                }
+            }
+        }
+    </script>
+</body>
+</html>

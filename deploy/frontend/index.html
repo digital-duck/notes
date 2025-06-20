@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Note Taking App - Standalone Alpine.js Frontend</title>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- AG-Grid CSS and JS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.0.0/styles/ag-grid.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@31.0.0/styles/ag-theme-alpine.css">
+    <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@31.0.0/dist/ag-grid-community.min.js"></script>
+    
+    <style>
+        .ag-theme-alpine {
+            --ag-header-background-color: #f8fafc;
+            --ag-odd-row-background-color: #f9fafb;
+            --ag-row-hover-color: #e5f3ff;
+            --ag-selected-row-background-color: #dbeafe;
+            --ag-border-color: #e5e7eb;
+        }
+        
+        .form-container {
+            transition: all 0.3s ease;
+            border-left: 4px solid transparent;
+        }
+        
+        .form-container.editing {
+            border-left-color: #f59e0b;
+            background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+        }
+        
+        .form-container.creating {
+            border-left-color: #10b981;
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .notification {
+            animation: slideInRight 0.3s ease-out;
+        }
+        
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+        }
+        
+        .connection-status.connected {
+            color: #10b981;
+        }
+        
+        .connection-status.disconnected {
+            color: #ef4444;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8" x-data="notesApp()">
+        
+        <!-- Connection Status Indicator -->
+        <div class="connection-status" :class="connectionStatus === 'connected' ? 'connected' : 'disconnected'">
+            <div class="flex items-center space-x-2 bg-white px-3 py-2 rounded-lg shadow-sm border">
+                <div class="w-2 h-2 rounded-full" :class="connectionStatus === 'connected' ? 'bg-green-500' : 'bg-red-500'"></div>
+                <span class="text-sm font-medium" x-text="connectionStatus === 'connected' ? 'API Connected' : 'API Disconnected'"></span>
+                <span class="text-xs text-gray-500" x-text="apiBaseUrl"></span>
+            </div>
+        </div>
+
+        <!-- Header -->
+        <div class="bg-white rounded-lg shadow-sm p-6 mb-8">
+            <div class="flex justify-between items-center">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-800 mb-2">📝 Standalone Alpine.js Frontend</h1>
+                    <p class="text-gray-600">Frontend (Node.js :3000) ↔ Backend (FastAPI :8000)</p>
+                    <div class="mt-2 text-sm text-blue-600">
+                        <span>Frontend: </span><code class="bg-blue-50 px-2 py-1 rounded">http://localhost:3000</code>
+                        <span class="ml-4">API: </span><code class="bg-blue-50 px-2 py-1 rounded" x-text="apiBaseUrl"></code>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="text-2xl font-bold text-blue-600" x-text="notes.length"></div>
+                    <div class="text-sm text-gray-500">Total Notes</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- API Testing Panel -->
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-8">
+            <h3 class="font-semibold text-yellow-800 mb-2">🔧 API Connection Testing</h3>
+            <div class="flex space-x-2">
+                <button @click="testConnection()" 
+                        class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 text-sm">
+                    Test API Connection
+                </button>
+                <button @click="toggleApiUrl()" 
+                        class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 text-sm">
+                    Toggle API URL
+                </button>
+                <div class="flex items-center">
+                    <span class="text-sm text-gray-600">Current API:</span>
+                    <code class="ml-2 bg-gray-100 px-2 py-1 rounded text-sm" x-text="apiBaseUrl"></code>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div x-show="loading" class="fixed top-4 right-4 z-50">
+            <div class="bg-white rounded-lg shadow-lg p-4 flex items-center">
+                <div class="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500 mr-2"></div>
+                <span class="text-gray-700">Processing...</span>
+            </div>
+        </div>
+
+        <!-- Notifications -->
+        <div class="fixed top-4 right-4 z-40 space-y-2">
+            <div x-show="error" x-transition class="notification bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg shadow-lg max-w-md">
+                <div class="flex justify-between items-center">
+                    <span x-text="error"></span>
+                    <button @click="error = ''" class="ml-2 text-red-500 hover:text-red-700">×</button>
+                </div>
+            </div>
+            
+            <div x-show="success" x-transition class="notification bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded-lg shadow-lg max-w-md">
+                <div class="flex justify-between items-center">
+                    <span x-text="success"></span>
+                    <button @click="success = ''" class="ml-2 text-green-500 hover:text-green-700">×</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Notes Grid - Takes 2/3 width on large screens -->
+            <div class="lg:col-span-2">
+                <div class="bg-white rounded-lg shadow-sm">
+                    <!-- Grid Header -->
+                    <div class="p-4 border-b border-gray-200 flex justify-between items-center">
+                        <h2 class="text-xl font-semibold text-gray-800">Notes Table</h2>
+                        <div class="flex items-center space-x-2 text-sm text-gray-600">
+                            <span x-show="selectedNote">
+                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded">Row Selected</span>
+                            </span>
+                            <button 
+                                @click="clearSelection()"
+                                x-show="selectedNote"
+                                class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded text-sm transition-colors"
+                            >
+                                Clear Selection
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- AG-Grid Container -->
+                    <div class="p-4">
+                        <div 
+                            id="myGrid" 
+                            class="ag-theme-alpine" 
+                            style="height: 500px; width: 100%;"
+                        ></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form Panel - Takes 1/3 width on large screens -->
+            <div class="lg:col-span-1">
+                <div class="bg-white rounded-lg shadow-sm form-container" 
+                     :class="{'editing': selectedNote, 'creating': !selectedNote}">
+                    
+                    <!-- Form Header -->
+                    <div class="p-4 border-b border-gray-200">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-xl font-semibold text-gray-800">
+                                <span x-show="selectedNote" class="text-amber-600">✏️ Edit Note</span>
+                                <span x-show="!selectedNote" class="text-green-600">➕ Create New Note</span>
+                            </h2>
+                            <div x-show="selectedNote" class="text-sm text-gray-500">
+                                ID: <span x-text="selectedNote?.id"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- Selection Info -->
+                        <div x-show="selectedNote" class="mt-2 text-sm text-amber-700 bg-amber-50 px-3 py-2 rounded">
+                            <strong>Selected:</strong> <span x-text="selectedNote?.note_name"></span>
+                        </div>
+                        <div x-show="!selectedNote" class="mt-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded">
+                            Fill out the form below to create a new note
+                        </div>
+                    </div>
+
+                    <!-- Form Content -->
+                    <div class="p-4">
+                        <form @submit.prevent="selectedNote ? updateNote() : createNote()">
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">
+                                        Note Name <span class="text-red-500">*</span>
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        x-model="form.note_name" 
+                                        required
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        placeholder="Enter note name"
+                                    >
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Note URL</label>
+                                    <input 
+                                        type="url" 
+                                        x-model="form.note_url"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        placeholder="https://example.com"
+                                    >
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                                    <textarea 
+                                        x-model="form.note_description"
+                                        rows="3"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        placeholder="Enter note description"
+                                    ></textarea>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Comments</label>
+                                    <textarea 
+                                        x-model="form.note_comment"
+                                        rows="2"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        placeholder="Additional comments"
+                                    ></textarea>
+                                </div>
+                                
+                                <!-- Timestamps Display (when editing) -->
+                                <div x-show="selectedNote" class="bg-gray-50 p-3 rounded-md">
+                                    <div class="text-xs text-gray-600 space-y-1">
+                                        <div>
+                                            <strong>Created:</strong> 
+                                            <span x-text="selectedNote ? formatDate(selectedNote.created_at) : ''"></span>
+                                        </div>
+                                        <div x-show="selectedNote && selectedNote.updated_at !== selectedNote.created_at">
+                                            <strong>Updated:</strong> 
+                                            <span x-text="selectedNote ? formatDate(selectedNote.updated_at) : ''"></span>
+                                        </div>
+                                        <div>
+                                            <strong>Created by:</strong> 
+                                            <span x-text="selectedNote?.created_by"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Form Actions -->
+                            <div class="flex gap-2 mt-6 pt-4 border-t border-gray-200">
+                                <button 
+                                    type="submit" 
+                                    :disabled="loading || connectionStatus !== 'connected'"
+                                    class="flex-1 bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 text-white px-4 py-2 rounded-md transition-colors font-medium"
+                                    :class="selectedNote ? 'bg-amber-500 hover:bg-amber-600' : 'bg-green-500 hover:bg-green-600'"
+                                >
+                                    <span x-show="selectedNote">💾 Update Note</span>
+                                    <span x-show="!selectedNote">➕ Create Note</span>
+                                </button>
+                                
+                                <button 
+                                    x-show="selectedNote"
+                                    type="button" 
+                                    @click="deleteNote(selectedNote.id)"
+                                    class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md transition-colors"
+                                    title="Delete Note"
+                                    :disabled="connectionStatus !== 'connected'"
+                                >
+                                    🗑️
+                                </button>
+                                
+                                <button 
+                                    x-show="selectedNote"
+                                    type="button" 
+                                    @click="clearSelection()"
+                                    class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-md transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function notesApp() {
+            return {
+                // Configuration
+                apiBaseUrl: 'http://localhost:8000',
+                connectionStatus: 'disconnected',
+                
+                // State management
+                notes: [],
+                loading: false,
+                error: '',
+                success: '',
+                selectedNote: null,
+                gridApi: null,
+                form: {
+                    note_name: '',
+                    note_description: '',
+                    note_url: '',
+                    note_comment: ''
+                },
+
+                // Initialize app
+                async init() {
+                    console.log('🚀 Initializing Alpine.js Notes App');
+                    console.log('📡 API Base URL:', this.apiBaseUrl);
+                    
+                    await this.testConnection();
+                    await this.loadNotes();
+                    this.initializeGrid();
+                },
+
+                // Test API connection
+                async testConnection() {
+                    console.log('🔍 Testing API connection...');
+                    
+                    try {
+                        const response = await fetch(`${this.apiBaseUrl}/api/notes`, {
+                            method: 'GET',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            },
+                        });
+                        
+                        if (response.ok) {
+                            this.connectionStatus = 'connected';
+                            this.success = '✅ API connection successful!';
+                            console.log('✅ API connection successful');
+                            setTimeout(() => this.success = '', 2000);
+                        } else {
+                            throw new Error(`HTTP ${response.status}`);
+                        }
+                    } catch (error) {
+                        this.connectionStatus = 'disconnected';
+                        this.error = `❌ API connection failed: ${error.message}`;
+                        console.error('❌ API connection failed:', error);
+                    }
+                },
+
+                // Toggle between local and different API URLs for testing
+                toggleApiUrl() {
+                    const urls = [
+                        'http://localhost:8000',
+                        'http://127.0.0.1:8000',
+                        'http://localhost:8080'  // Alternative port for testing
+                    ];
+                    
+                    const currentIndex = urls.indexOf(this.apiBaseUrl);
+                    const nextIndex = (currentIndex + 1) % urls.length;
+                    this.apiBaseUrl = urls[nextIndex];
+                    
+                    console.log('🔄 Switched API URL to:', this.apiBaseUrl);
+                    this.testConnection();
+                },
+
+                // Make API request with proper error handling
+                async makeApiRequest(endpoint, options = {}) {
+                    const url = `${this.apiBaseUrl}${endpoint}`;
+                    
+                    console.log(`📡 API Request: ${options.method || 'GET'} ${url}`);
+                    
+                    const defaultOptions = {
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        ...options
+                    };
+
+                    try {
+                        const response = await fetch(url, defaultOptions);
+                        
+                        console.log(`📡 API Response: ${response.status} ${response.statusText}`);
+                        
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            throw new Error(`API Error: ${response.status} - ${errorText}`);
+                        }
+                        
+                        const data = await response.json();
+                        this.connectionStatus = 'connected';
+                        return data;
+                        
+                    } catch (error) {
+                        console.error('❌ API Request failed:', error);
+                        this.connectionStatus = 'disconnected';
+                        throw error;
+                    }
+                },
+
+                // Initialize AG-Grid
+                initializeGrid() {
+                    const columnDefs = [
+                        {
+                            headerName: "Name",
+                            field: "note_name",
+                            flex: 2,
+                            sortable: true,
+                            filter: true,
+                            cellRenderer: (params) => {
+                                const url = params.data.note_url;
+                                if (url) {
+                                    return `<div>
+                                        <div class="font-medium">${params.value}</div>
+                                        <div class="text-xs text-blue-600">🔗 ${url}</div>
+                                    </div>`;
+                                }
+                                return `<div class="font-medium">${params.value}</div>`;
+                            }
+                        },
+                        {
+                            headerName: "Description",
+                            field: "note_description",
+                            flex: 2,
+                            sortable: true,
+                            filter: true,
+                            cellRenderer: (params) => {
+                                if (!params.value) return '<span class="text-gray-400">No description</span>';
+                                const truncated = params.value.length > 100 ? 
+                                    params.value.substring(0, 100) + '...' : params.value;
+                                return `<div class="text-sm">${truncated}</div>`;
+                            }
+                        },
+                        {
+                            headerName: "Comment",
+                            field: "note_comment",
+                            flex: 1,
+                            sortable: true,
+                            filter: true,
+                            cellRenderer: (params) => {
+                                if (!params.value) return '<span class="text-gray-400">-</span>';
+                                const truncated = params.value.length > 50 ? 
+                                    params.value.substring(0, 50) + '...' : params.value;
+                                return `<div class="text-xs text-gray-600 italic">${truncated}</div>`;
+                            }
+                        },
+                        {
+                            headerName: "Created",
+                            field: "created_at",
+                            width: 120,
+                            sortable: true,
+                            filter: 'agDateColumnFilter',
+                            cellRenderer: (params) => {
+                                return `<div class="text-xs">${this.formatDate(params.value)}</div>`;
+                            }
+                        },
+                        {
+                            headerName: "Updated",
+                            field: "updated_at",
+                            width: 120,
+                            sortable: true,
+                            filter: 'agDateColumnFilter',
+                            cellRenderer: (params) => {
+                                return `<div class="text-xs">${this.formatDate(params.value)}</div>`;
+                            }
+                        }
+                    ];
+
+                    const gridOptions = {
+                        columnDefs: columnDefs,
+                        rowData: this.notes,
+                        rowSelection: 'single',
+                        animateRows: true,
+                        rowHeight: 60,
+                        headerHeight: 40,
+                        defaultColDef: {
+                            resizable: true,
+                            sortable: true,
+                            filter: true
+                        },
+                        onSelectionChanged: (event) => {
+                            const selectedRows = event.api.getSelectedRows();
+                            if (selectedRows.length > 0) {
+                                this.selectNote(selectedRows[0]);
+                            } else {
+                                this.selectedNote = null;
+                                this.resetForm();
+                            }
+                        },
+                        onGridReady: (params) => {
+                            this.gridApi = params.api;
+                            params.api.sizeColumnsToFit();
+                        }
+                    };
+
+                    const gridDiv = document.querySelector('#myGrid');
+                    agGrid.createGrid(gridDiv, gridOptions);
+                },
+
+                // Load all notes
+                async loadNotes() {
+                    this.loading = true;
+                    this.error = '';
+                    
+                    try {
+                        this.notes = await this.makeApiRequest('/api/notes');
+                        
+                        // Update grid data if grid is initialized
+                        if (this.gridApi) {
+                            this.gridApi.setGridOption('rowData', this.notes);
+                        }
+                        
+                        console.log(`📊 Loaded ${this.notes.length} notes`);
+                        
+                    } catch (error) {
+                        this.error = 'Error loading notes: ' + error.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Select a note from grid
+                selectNote(note) {
+                    this.selectedNote = note;
+                    this.form = {
+                        note_name: note.note_name || '',
+                        note_description: note.note_description || '',
+                        note_url: note.note_url || '',
+                        note_comment: note.note_comment || ''
+                    };
+                    console.log('📝 Selected note:', note.id);
+                },
+
+                // Clear selection
+                clearSelection() {
+                    this.selectedNote = null;
+                    this.resetForm();
+                    if (this.gridApi) {
+                        this.gridApi.deselectAll();
+                    }
+                    console.log('🔄 Cleared selection');
+                },
+
+                // Create new note
+                async createNote() {
+                    this.loading = true;
+                    this.error = '';
+                    this.success = '';
+                    
+                    try {
+                        await this.makeApiRequest('/api/notes', {
+                            method: 'POST',
+                            body: JSON.stringify(this.form)
+                        });
+                        
+                        this.success = '✅ Note created successfully!';
+                        this.resetForm();
+                        await this.loadNotes();
+                        
+                        setTimeout(() => this.success = '', 3000);
+                    } catch (error) {
+                        this.error = 'Error creating note: ' + error.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Update existing note
+                async updateNote() {
+                    if (!this.selectedNote) return;
+                    
+                    this.loading = true;
+                    this.error = '';
+                    this.success = '';
+                    
+                    try {
+                        await this.makeApiRequest(`/api/notes/${this.selectedNote.id}`, {
+                            method: 'PUT',
+                            body: JSON.stringify(this.form)
+                        });
+                        
+                        this.success = '✅ Note updated successfully!';
+                        await this.loadNotes();
+                        this.clearSelection();
+                        
+                        setTimeout(() => this.success = '', 3000);
+                    } catch (error) {
+                        this.error = 'Error updating note: ' + error.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Delete note
+                async deleteNote(noteId) {
+                    if (!confirm('⚠️ Are you sure you want to delete this note? This action cannot be undone.')) return;
+                    
+                    this.loading = true;
+                    this.error = '';
+                    this.success = '';
+                    
+                    try {
+                        await this.makeApiRequest(`/api/notes/${noteId}`, {
+                            method: 'DELETE'
+                        });
+                        
+                        this.success = '✅ Note deleted successfully!';
+                        this.clearSelection();
+                        await this.loadNotes();
+                        
+                        setTimeout(() => this.success = '', 3000);
+                    } catch (error) {
+                        this.error = 'Error deleting note: ' + error.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Reset form
+                resetForm() {
+                    this.form = {
+                        note_name: '',
+                        note_description: '',
+                        note_url: '',
+                        note_comment: ''
+                    };
+                },
+
+                // Format date
+                formatDate(dateString) {
+                    return new Date(dateString).toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                    });
+                }
+            }
+        }
+    </script>
+</body>
+</html>
