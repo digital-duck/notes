@@ -86,7 +86,8 @@ init_db()
 
 @app.get("/api/notes", response_model=List[Note])
 async def get_notes():
-    """Get all notes - Similar to st.dataframe() in Streamlit"""
+    """Fetch all notes
+    """
     with get_db() as conn:
         cursor = conn.execute("""
             SELECT id, note_name, note_description, note_url, note_comment,
@@ -94,7 +95,7 @@ async def get_notes():
             FROM my_note 
             ORDER BY updated_at DESC
         """)
-        notes = [dict(row) for row in cursor.fetchall()]
+        notes = [dict(note) for note in cursor.fetchall()]
         return notes
 
 @app.get("/api/notes/{note_id}", response_model=Note)
@@ -113,7 +114,7 @@ async def get_note(note_id: int):
 
 @app.post("/api/notes", response_model=Note)
 async def create_note(note: NoteCreate):
-    """Create a new note - Similar to st.form() submission in Streamlit"""
+    """Create a new note"""
     with get_db() as conn:
         cursor = conn.execute("""
             INSERT INTO my_note (note_name, note_description, note_url, note_comment)
@@ -132,7 +133,7 @@ async def create_note(note: NoteCreate):
 
 @app.put("/api/notes/{note_id}", response_model=Note)
 async def update_note(note_id: int, note: NoteUpdate):
-    """Update an existing note"""
+    """Update a specific note by ID"""
     with get_db() as conn:
         # Check if note exists
         cursor = conn.execute("SELECT id FROM my_note WHERE id = ?", (note_id,))
